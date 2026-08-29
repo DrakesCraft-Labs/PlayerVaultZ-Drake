@@ -57,6 +57,7 @@ implements InventoryHolder {
         this.returnPage = returnPage;
         this.loadVaultItems();
         this.createGUI();
+        ItemPickerGuard.ensureRegistered(plugin);
     }
 
     private void loadVaultItems() {
@@ -144,6 +145,9 @@ implements InventoryHolder {
     }
 
     public void handleClick(int slot, ClickType clickType) {
+        if (slot < 0 || slot >= GUI_SIZE || clickType == null) {
+            return;
+        }
         if (slot < 45) {
             int index = this.currentPage * 45 + slot;
             if (index < this.vaultItems.size()) {
@@ -175,6 +179,10 @@ implements InventoryHolder {
             case SHIFT_LEFT: 
             case SHIFT_RIGHT: {
                 this.retrieveAllOfType(targetItem);
+                break;
+            }
+            default: {
+                break;
             }
         }
     }
@@ -271,6 +279,9 @@ implements InventoryHolder {
                 if (this.currentPage >= totalPages - 1) break;
                 ++this.currentPage;
                 this.refresh();
+            }
+            default: {
+                break;
             }
         }
     }
