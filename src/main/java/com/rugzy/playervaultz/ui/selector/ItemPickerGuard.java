@@ -84,17 +84,6 @@ public final class ItemPickerGuard implements Listener {
         if (involvesTop) {
             event.setCancelled(true);
             event.setResult(Event.Result.DENY);
-
-            if (event.getClickedInventory() != null && event.getClickedInventory().equals(event.getView().getTopInventory())) {
-                int topSlot = event.getSlot();
-                if (topSlot < 0 || topSlot >= topSize) {
-                    topSlot = rawSlot;
-                }
-                if (topSlot >= 0 && topSlot < topSize) {
-                    ItemPickerGUI gui = (ItemPickerGUI) event.getView().getTopInventory().getHolder();
-                    gui.handleClick(topSlot, event.getClick());
-                }
-            }
         }
     }
 

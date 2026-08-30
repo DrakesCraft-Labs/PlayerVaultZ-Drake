@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 class ItemPickerGuardTest {
 
     @Test
-    void cancelsClickInTopInventoryAndForwardsToHandler() {
+    void cancelsClickInTopInventoryWithoutDispatchingTwice() {
         Inventory top = mock(Inventory.class);
         ItemPickerGUI gui = mock(ItemPickerGUI.class);
         when(top.getHolder()).thenReturn(gui);
@@ -33,7 +33,7 @@ class ItemPickerGuardTest {
         guard.onInventoryClick(event);
 
         verify(event).setCancelled(true);
-        verify(gui).handleClick(10, ClickType.LEFT);
+        verify(gui, never()).handleClick(anyInt(), any());
     }
 
     @Test
