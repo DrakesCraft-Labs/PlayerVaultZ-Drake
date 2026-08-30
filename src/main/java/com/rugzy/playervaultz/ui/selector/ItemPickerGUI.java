@@ -187,7 +187,25 @@ implements InventoryHolder {
         }
     }
 
+    /**
+     * Entrega items del vault SOLO cuando la persistencia esta confirmada.
+     *
+     * Antes se anadian al inventario del jugador de inmediato y el guardado corria
+     * despues, de forma asincrona. Si ese guardado fallaba, el item ya estaba en el
+     * inventario pero el vault seguia conteniendolo al releerse de disco: duplicado
+     * permanente que ni siquiera desaparecia al reconectar. Es el reporte de
+     * Dival_830 ("pasa a mi inventario pero tambien se mantiene en el vault").
+     *
+     * Ahora se retira en memoria, se persiste, y solo entonces se entrega. Si el
+     * guardado falla se restaura el vault exactamente como estaba y no se entrega
+     * nada: es preferible repetir el clic a duplicar.
+     */
     private void retrieveItems(ItemStack target, int amount) {
+        if (this.retrievalInProgress) {
+            // Una retirada en vuelo. Los packs de UI que remapean botones envian
+            // rafagas de clics; sin esto se solapan varias retiradas del mismo slot.
+            return;
+        }
         int capacity = InventoryCapacity.availableFor(this.viewer.getInventory(), target);
         if (capacity <= 0) {
             this.viewer.sendMessage(Component.text("Your inventory is full!").color(NamedTextColor.RED));
@@ -195,6 +213,8 @@ implements InventoryHolder {
         }
 
         this.retrievalInProgress = true;
+        List<VaultSlotSnapshot> snapshots = new ArrayList<VaultSlotSnapshot>();
+        List<ItemStack> withdrawnItems = new ArrayList<ItemStack>();
         int retrieved = 0;
         int requested = Math.min(amount, capacity);
         for (VaultPage page : this.vault.getPages()) {
@@ -203,33 +223,67 @@ implements InventoryHolder {
                 if (stored == null || !stored.isSimilar(target)) {
                     continue;
                 }
-
+                snapshots.add(new VaultSlotSnapshot(page, slot, stored.clone()));
                 ItemStack withdrawn = VaultSlotWithdrawal.take(page, slot, requested - retrieved);
-                this.viewer.getInventory().addItem(withdrawn);
+                withdrawnItems.add(withdrawn);
                 retrieved += withdrawn.getAmount();
             }
         }
-        if (retrieved > 0) {
-            this.vault.markDirty();
-            int finalRetrieved = retrieved;
-            this.plugin.getVaultManager().saveVault(this.vault).whenComplete((saved, error) ->
-                Bukkit.getScheduler().runTask(this.plugin, () -> {
-                    this.retrievalInProgress = false;
-                    if (error != null || !Boolean.TRUE.equals(saved)) {
-                        this.plugin.getLogger().severe("Quick Pick withdrawal could not be persisted for "
-                            + this.viewer.getUniqueId() + " in vault #" + this.vault.getVaultNumber());
-                        this.viewer.sendMessage(Component.text("The vault save will be retried automatically.")
-                            .color(NamedTextColor.RED));
-                    }
-                    this.viewer.sendMessage(Component.text("Retrieved " + finalRetrieved + "x "
-                        + this.formatMaterialName(target.getType())).color(NamedTextColor.GREEN));
-                    this.loadVaultItems();
-                    this.refresh();
-                })
-            );
+        if (retrieved <= 0) {
+            this.retrievalInProgress = false;
             return;
         }
-        this.retrievalInProgress = false;
+
+        this.vault.markDirty();
+        int finalRetrieved = retrieved;
+        this.plugin.getVaultManager().saveVault(this.vault).whenComplete((saved, error) ->
+            Bukkit.getScheduler().runTask(this.plugin, () -> {
+                this.retrievalInProgress = false;
+                if (error != null || !Boolean.TRUE.equals(saved)) {
+                    for (VaultSlotSnapshot snapshot : snapshots) {
+                        snapshot.restore();
+                    }
+                    this.vault.markDirty();
+                    this.plugin.getLogger().severe("Quick Pick withdrawal could not be persisted for "
+                        + this.viewer.getUniqueId() + " in vault #" + this.vault.getVaultNumber()
+                        + "; vault restaurado y no se entrego nada");
+                    this.viewer.sendMessage(Component.text(
+                        "No se pudo guardar el vault. No se retiro nada; intentalo de nuevo.")
+                        .color(NamedTextColor.RED));
+                    this.loadVaultItems();
+                    this.refresh();
+                    return;
+                }
+                for (ItemStack withdrawn : withdrawnItems) {
+                    for (ItemStack leftover : this.viewer.getInventory().addItem(withdrawn).values()) {
+                        // El inventario pudo llenarse entre la comprobacion y este tick.
+                        // Se suelta al suelo antes que perderlo.
+                        this.viewer.getWorld().dropItemNaturally(this.viewer.getLocation(), leftover);
+                    }
+                }
+                this.viewer.sendMessage(Component.text("Retrieved " + finalRetrieved + "x "
+                    + this.formatMaterialName(target.getType())).color(NamedTextColor.GREEN));
+                this.loadVaultItems();
+                this.refresh();
+            })
+        );
+    }
+
+    /** Estado de un slot antes de retirar, para deshacer si la persistencia falla. */
+    private static final class VaultSlotSnapshot {
+        private final VaultPage page;
+        private final int slot;
+        private final ItemStack previous;
+
+        VaultSlotSnapshot(VaultPage page, int slot, ItemStack previous) {
+            this.page = page;
+            this.slot = slot;
+            this.previous = previous;
+        }
+
+        void restore() {
+            this.page.setItem(this.slot, this.previous);
+        }
     }
 
     private void retrieveAllOfType(ItemStack target) {
