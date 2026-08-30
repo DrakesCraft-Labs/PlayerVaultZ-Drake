@@ -9,6 +9,14 @@ import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 
+/**
+ * Bloquea transferencias vanilla hacia/desde Quick Pick.
+ *
+ * <p>Este listener es deliberadamente sólo un guardia: el listener principal
+ * del selector es el único responsable de llamar a {@code ItemPickerGUI.handleClick}.
+ * Despachar la pulsación aquí también retira el mismo ítem dos veces y vuelve a
+ * introducir el duplicado reportado por jugadores Bedrock.</p>
+ */
 public final class ItemPickerGuard implements Listener {
 
     private static volatile boolean registered = false;
@@ -82,6 +90,9 @@ public final class ItemPickerGuard implements Listener {
         }
 
         if (involvesTop) {
+            // No manejar la acción aquí. El selector ya procesa el click una vez;
+            // esta cancelación únicamente impide que Bukkit aplique una segunda
+            // transferencia vanilla (shift click, tecla numérica, arrastre, etc.).
             event.setCancelled(true);
             event.setResult(Event.Result.DENY);
         }
